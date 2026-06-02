@@ -44,6 +44,17 @@ def get_trains_at_station(station_code: str):
     if not sched:
         return []
 
+
+    # Exclude local EMU/suburban trains by train number prefix
+    # 4xxxx = EMU/MEMU suburban, 7xxxx = DEMU, 0xxxx = special/work trains
+    LOCAL_PREFIXES = ("4", "7", "0")
+    sched = [
+        r for r in sched
+        if not str(r["train_number"]).startswith(LOCAL_PREFIXES)
+    ]
+
+    if not sched:
+        return []
     # Step 2: get train details for those train numbers
     train_nos = list({r["train_number"] for r in sched})
 
