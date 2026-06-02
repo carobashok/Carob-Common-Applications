@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from supabase import create_client
 
 st.set_page_config(page_title="Train Schedule Finder", page_icon="🚆", layout="wide")
 
@@ -12,69 +13,156 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Verified Train Database ────────────────────────────────────────────────────
-# Sources: IndiaRailInfo, Wikipedia, IRCTC, ixigo — verified train numbers only
-TRAIN_DB = {
-    "Chennai Central (MAS)": [
-        # VERIFIED: indiarailinfo.com, wikipedia
-        dict(no="12621", name="Tamil Nadu SF Express",                    type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="NDLS", to_name="New Delhi",            arr="--",    dep="22:00", dur="32h 30m", dist=2182, stops=11, classes="1A, 2A, 3A, SL, GEN", days="Daily",                   rel="Originates"),
-        dict(no="12433", name="Chennai Rajdhani Express",                 type="Rajdhani",     frm="MAS", frm_name="Chennai Central",    to="NZM",  to_name="Hazrat Nizamuddin",    arr="--",    dep="06:10", dur="28h 15m", dist=2182, stops=8,  classes="1A, 2A, 3A",          days="Tue Fri",                 rel="Originates"),
-        dict(no="12695", name="Chennai–Trivandrum SF Express",            type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="TVC",  to_name="Trivandrum Central",   arr="--",    dep="15:20", dur="16h 30m", dist=922,  stops=22, classes="2A, 3A, SL",          days="Daily",                   rel="Originates"),
-        dict(no="12673", name="Cheran SF Express",                        type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="CBE",  to_name="Coimbatore Jn",        arr="--",    dep="22:00", dur="8h 00m",  dist=495,  stops=7,  classes="2A, 3A, SL, GEN",     days="Daily",                   rel="Originates"),
-        dict(no="12603", name="Chennai–Charlapalli SF Express",           type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="CHZ",  to_name="Charlapalli",          arr="--",    dep="06:10", dur="12h 00m", dist=694,  stops=19, classes="1A, 2A, 3A, SL, GEN", days="Daily",                   rel="Originates"),
-        dict(no="12607", name="Lalbagh Express",                          type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="SBC",  to_name="KSR Bengaluru City",   arr="--",    dep="15:30", dur="6h 05m",  dist=358,  stops=5,  classes="CC, 2S",              days="Daily",                   rel="Originates"),
-        dict(no="12609", name="Mysuru Express",                           type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="MYS",  to_name="Mysuru Jn",            arr="--",    dep="13:35", dur="9h 15m",  dist=497,  stops=8,  classes="CC, 2S",              days="Daily",                   rel="Originates"),
-        dict(no="16053", name="Chennai–Tirupati Express",                 type="Express",      frm="MAS", frm_name="Chennai Central",    to="TPTY", to_name="Tirupati",             arr="--",    dep="06:10", dur="3h 25m",  dist=147,  stops=6,  classes="GEN",                 days="Daily",                   rel="Originates"),
-        dict(no="20601", name="Chennai–Bodinayakanur SF Express",         type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="BSNR", to_name="Bodinayakanur",        arr="--",    dep="21:00", dur="11h 05m", dist=728,  stops=8,  classes="1A, 2A, 3A, SL, GEN", days="Mon Wed Fri",             rel="Originates"),
-        dict(no="20625", name="Chennai–Bhagat Ki Kothi SF Express",       type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="BGKT", to_name="Bhagat Ki Kothi",      arr="--",    dep="09:15", dur="40h 30m", dist=2351, stops=30, classes="2A, 3A, SL, GEN",     days="Wed",                     rel="Originates"),
-        dict(no="20643", name="Chennai–Coimbatore Vande Bharat Express",  type="Vande Bharat", frm="MAS", frm_name="Chennai Central",    to="CBE",  to_name="Coimbatore Jn",        arr="--",    dep="06:00", dur="5h 50m",  dist=495,  stops=3,  classes="EC, CC",              days="Mon Tue Wed Thu Fri Sat", rel="Originates"),
-        dict(no="20677", name="Chennai–Narasapur Vande Bharat Express",   type="Vande Bharat", frm="MAS", frm_name="Chennai Central",    to="NS",   to_name="Narasapur",            arr="--",    dep="05:50", dur="8h 40m",  dist=652,  stops=7,  classes="EC, CC",              days="Mon Tue Wed Thu Fri Sat", rel="Originates"),
-        dict(no="22601", name="Chennai–Sainagar Shirdi SF Express",       type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="SNSI", to_name="Sainagar Shirdi",      arr="--",    dep="13:25", dur="18h 15m", dist=1247, stops=16, classes="2A, 3A, SL, GEN",     days="Fri",                     rel="Originates"),
-        dict(no="22869", name="Chennai–Visakhapatnam SF Express",         type="Superfast",    frm="MAS", frm_name="Chennai Central",    to="VSKP", to_name="Visakhapatnam",        arr="--",    dep="06:20", dur="13h 15m", dist=781,  stops=11, classes="2A, 3A, SL, GEN",     days="Tue",                     rel="Originates"),
-        dict(no="16003", name="Chennai–Nagarsol Express",                 type="Express",      frm="MAS", frm_name="Chennai Central",    to="NSL",  to_name="Nagarsol",             arr="--",    dep="12:10", dur="26h 45m", dist=1367, stops=24, classes="2A, 3A, SL, GEN",     days="Wed",                     rel="Originates"),
-        # Terminating at MAS
-        dict(no="12622", name="Tamil Nadu SF Express (return)",           type="Superfast",    frm="NDLS",frm_name="New Delhi",          to="MAS",  to_name="Chennai Central",      arr="06:30", dep="--",    dur="32h 30m", dist=2182, stops=11, classes="1A, 2A, 3A, SL, GEN", days="Daily",                   rel="Terminates"),
-        dict(no="12434", name="Chennai Rajdhani Express (return)",        type="Rajdhani",     frm="NZM", frm_name="Hazrat Nizamuddin",  to="MAS",  to_name="Chennai Central",      arr="10:55", dep="--",    dur="28h 15m", dist=2182, stops=8,  classes="1A, 2A, 3A",          days="Wed Sat",                 rel="Terminates"),
-        dict(no="12696", name="Trivandrum–Chennai SF Express (return)",   type="Superfast",    frm="TVC", frm_name="Trivandrum Central", to="MAS",  to_name="Chennai Central",      arr="07:50", dep="--",    dur="16h 30m", dist=922,  stops=22, classes="2A, 3A, SL",          days="Daily",                   rel="Terminates"),
-        dict(no="12674", name="Cheran SF Express (return)",               type="Superfast",    frm="CBE", frm_name="Coimbatore Jn",      to="MAS",  to_name="Chennai Central",      arr="06:20", dep="--",    dur="8h 00m",  dist=495,  stops=7,  classes="2A, 3A, SL, GEN",     days="Daily",                   rel="Terminates"),
-        dict(no="12608", name="Lalbagh Express (return)",                 type="Superfast",    frm="SBC", frm_name="KSR Bengaluru City", to="MAS",  to_name="Chennai Central",      arr="21:35", dep="--",    dur="6h 05m",  dist=358,  stops=5,  classes="CC, 2S",              days="Daily",                   rel="Terminates"),
-        dict(no="12610", name="Mysuru Express (return)",                  type="Superfast",    frm="MYS", frm_name="Mysuru Jn",          to="MAS",  to_name="Chennai Central",      arr="22:50", dep="--",    dur="9h 15m",  dist=497,  stops=8,  classes="CC, 2S",              days="Daily",                   rel="Terminates"),
-        dict(no="18042", name="Shalimar–Chennai Express",                 type="Express",      frm="SHM", frm_name="Shalimar",           to="MAS",  to_name="Chennai Central",      arr="19:15", dep="--",    dur="18h 45m", dist=1644, stops=18, classes="GEN, SL, 3A, 2A",     days="Sat",                     rel="Terminates"),
-        dict(no="12604", name="Charlapalli–Chennai SF Express (return)",  type="Superfast",    frm="CHZ", frm_name="Charlapalli",        to="MAS",  to_name="Chennai Central",      arr="19:30", dep="--",    dur="12h 00m", dist=694,  stops=19, classes="1A, 2A, 3A, SL, GEN", days="Daily",                   rel="Terminates"),
-        dict(no="16054", name="Tirupati–Chennai Express (return)",        type="Express",      frm="TPTY",frm_name="Tirupati",           to="MAS",  to_name="Chennai Central",      arr="21:45", dep="--",    dur="3h 25m",  dist=147,  stops=6,  classes="GEN",                 days="Daily",                   rel="Terminates"),
-    ],
-}
+# ── Supabase client ────────────────────────────────────────────────────────────
+@st.cache_resource
+def get_client():
+    return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+
+supabase = get_client()
+
+# ── Load station list for dropdown (cached) ────────────────────────────────────
+@st.cache_data(ttl=3600)
+def load_stations():
+    res = supabase.table("stations") \
+        .select("station_code, station_name, zone, state") \
+        .order("station_name") \
+        .execute()
+    return res.data  # list of dicts
+
+@st.cache_data(ttl=3600)
+def get_trains_at_station(station_code: str):
+    """
+    Get all schedule rows for a station, then enrich with train details.
+    Returns a merged list of dicts.
+    """
+    # Step 1: all schedule rows for this station
+    sched = supabase.table("schedules") \
+        .select("train_number, train_name, arrival, departure, day") \
+        .eq("station_code", station_code) \
+        .execute().data
+
+    if not sched:
+        return []
+
+    # Step 2: get train details for those train numbers
+    train_nos = list({r["train_number"] for r in sched})
+
+    # Supabase .in_() filter — fetch in one call
+    trains_res = supabase.table("trains") \
+        .select("train_number, train_name, train_type, from_station_code, from_station_name, to_station_code, to_station_name, departure, arrival, duration_h, duration_m, distance_km, classes") \
+        .in_("train_number", train_nos) \
+        .execute().data
+
+    train_map = {t["train_number"]: t for t in trains_res}
+
+    # Step 3: merge and determine relation
+    merged = []
+    for s in sched:
+        t = train_map.get(s["train_number"], {})
+        arr = s.get("arrival",   "") or ""
+        dep = s.get("departure", "") or ""
+        arr = "" if arr in ("None", "null", "none") else arr.replace(":00", "", 1) if arr.count(":") == 2 else arr
+        dep = "" if dep in ("None", "null", "none") else dep.replace(":00", "", 1) if dep.count(":") == 2 else dep
+
+        # Determine relation
+        from_code = t.get("from_station_code", "")
+        to_code   = t.get("to_station_code",   "")
+        if from_code == station_code:
+            rel = "Originates"
+        elif to_code == station_code:
+            rel = "Terminates"
+        else:
+            rel = "Passes"
+
+        dur_h = t.get("duration_h", 0) or 0
+        dur_m = t.get("duration_m", 0) or 0
+
+        merged.append({
+            "train_number":      s["train_number"],
+            "train_name":        s.get("train_name") or t.get("train_name", ""),
+            "train_type":        t.get("train_type", ""),
+            "from_station_code": from_code,
+            "from_station_name": t.get("from_station_name", ""),
+            "to_station_code":   to_code,
+            "to_station_name":   t.get("to_station_name", ""),
+            "arrival":           arr,
+            "departure":         dep,
+            "duration":          f"{dur_h}h {dur_m:02d}m" if (dur_h or dur_m) else "",
+            "distance_km":       t.get("distance_km", 0) or 0,
+            "classes":           t.get("classes", "") or "",
+            "relation":          rel,
+        })
+
+    return merged
+
+@st.cache_data(ttl=3600)
+def get_train_stops(train_number: str):
+    """Get all intermediate stops for a train, ordered by id."""
+    res = supabase.table("schedules") \
+        .select("station_code, station_name, arrival, departure, day, id") \
+        .eq("train_number", train_number) \
+        .order("id") \
+        .execute()
+    return res.data
+
+def fmt_time(t):
+    """Strip seconds from HH:MM:SS → HH:MM."""
+    if not t or t in ("None", "null", ""):
+        return "--"
+    parts = t.split(":")
+    if len(parts) >= 2:
+        return f"{parts[0]}:{parts[1]}"
+    return t
 
 TYPE_COLORS = {
-    "Rajdhani":    "#993556",
-    "Vande Bharat":"#534AB7",
-    "Shatabdi":    "#185FA5",
-    "Duronto":     "#534AB7",
-    "Jan Shatabdi":"#185FA5",
-    "Superfast":   "#3B6D11",
-    "Mail":        "#185FA5",
-    "Express":     "#854F0B",
-    "Passenger":   "#5F5E5A",
-    "MEMU":        "#5F5E5A",
-    "DEMU":        "#5F5E5A",
+    "RAJDHANI EXP": "#993556", "RAJDHANI":    "#993556",
+    "VANDE BHART":  "#534AB7", "VANDE BHARAT":"#534AB7",
+    "SHATABDI":     "#185FA5", "JAN SHATABDI":"#185FA5",
+    "DURONTO":      "#534AB7", "HUMSAFAR":    "#534AB7",
+    "SUPERFAST":    "#3B6D11", "SF EXPRESS":  "#3B6D11",
+    "EXPRESS":      "#854F0B", "MAIL":        "#185FA5",
+    "PASSENGER":    "#5F5E5A", "MEMU":        "#5F5E5A",
+    "DEMU":         "#5F5E5A",
 }
+
+def type_color(t):
+    return TYPE_COLORS.get(t.upper() if t else "", "#5F5E5A")
+
+PREMIUM = {"RAJDHANI EXP","RAJDHANI","VANDE BHART","VANDE BHARAT",
+           "SHATABDI","JAN SHATABDI","DURONTO","HUMSAFAR"}
+SF_TYPES = {"SUPERFAST","SF EXPRESS"}
+EX_TYPES = {"EXPRESS","MAIL"}
 
 def time_to_min(t):
     if not t or t == "--":
         return 9999
-    h, m = map(int, t.split(":"))
-    return h * 60 + m
+    try:
+        parts = t.split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    except:
+        return 9999
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("## 🚆 Train Schedule Finder")
-st.caption("Trains originating, terminating, or passing through Indian Railway stations")
+st.caption("Trains originating, terminating, or passing through any Indian Railway station")
 st.divider()
 
+# ── Load stations ──────────────────────────────────────────────────────────────
+with st.spinner("Loading stations..."):
+    all_stations = load_stations()
+
+station_options = {
+    f"{s['station_name']} ({s['station_code']})": s["station_code"]
+    for s in all_stations
+    if s.get("station_name") and s.get("station_code")
+}
+
+# ── Search bar ─────────────────────────────────────────────────────────────────
 col1, col2 = st.columns([3, 1])
 with col1:
-    station = st.selectbox(
+    selected_label = st.selectbox(
         "Select Station",
-        options=["— select a station —"] + list(TRAIN_DB.keys()),
+        options=["— select a station —"] + list(station_options.keys()),
         index=0,
         label_visibility="collapsed",
     )
@@ -85,41 +173,47 @@ with col2:
         label_visibility="collapsed",
     )
 
-if station == "— select a station —":
-    st.info("👆 Select a station above to see trains", icon="🛤️")
+if selected_label == "— select a station —":
+    st.info("👆 Select any station above — all 8,500+ Indian Railway stations are available", icon="🛤️")
     st.stop()
 
-trains = TRAIN_DB[station]
+station_code = station_options[selected_label]
+
+# ── Fetch trains ───────────────────────────────────────────────────────────────
+with st.spinner(f"Fetching trains at {selected_label}..."):
+    trains = get_trains_at_station(station_code)
+
+if not trains:
+    st.warning(f"No trains found for station code **{station_code}**.")
+    st.stop()
 
 # ── Filters ────────────────────────────────────────────────────────────────────
 fc1, fc2, fc3, fc4, fc5 = st.columns(5)
-with fc1: f_all  = st.checkbox("All",            value=True)
-with fc2: f_prem = st.checkbox("Premium",         value=False)
-with fc3: f_sf   = st.checkbox("Superfast",       value=False)
-with fc4: f_exp  = st.checkbox("Express / Mail",  value=False)
+with fc1: f_all  = st.checkbox("All",           value=True)
+with fc2: f_prem = st.checkbox("Premium",        value=False)
+with fc3: f_sf   = st.checkbox("Superfast",      value=False)
+with fc4: f_exp  = st.checkbox("Express / Mail", value=False)
 with fc5:
     f_rel = st.selectbox("Relation",
         ["Any", "Originates here", "Terminates here", "Passes through"],
         label_visibility="collapsed")
 
-PREMIUM = {"Rajdhani", "Shatabdi", "Vande Bharat", "Duronto", "Jan Shatabdi"}
-SF      = {"Superfast"}
-EXP     = {"Express", "Mail"}
-
 def passes_filter(t):
+    typ = (t.get("train_type") or "").upper()
     if not f_all and not f_prem and not f_sf and not f_exp:
-        return True
-    type_ok = (
-        f_all or
-        (f_prem and t["type"] in PREMIUM) or
-        (f_sf   and t["type"] in SF) or
-        (f_exp  and t["type"] in EXP)
-    )
+        type_ok = True
+    else:
+        type_ok = (
+            f_all or
+            (f_prem and typ in PREMIUM) or
+            (f_sf   and typ in SF_TYPES) or
+            (f_exp  and typ in EX_TYPES)
+        )
     rel_ok = (
         f_rel == "Any" or
-        (f_rel == "Originates here"  and t["rel"] == "Originates") or
-        (f_rel == "Terminates here"  and t["rel"] == "Terminates") or
-        (f_rel == "Passes through"   and t["rel"] == "Passes")
+        (f_rel == "Originates here"  and t["relation"] == "Originates") or
+        (f_rel == "Terminates here"  and t["relation"] == "Terminates") or
+        (f_rel == "Passes through"   and t["relation"] == "Passes")
     )
     return type_ok and rel_ok
 
@@ -127,21 +221,20 @@ filtered = [t for t in trains if passes_filter(t)]
 
 # ── Sort ───────────────────────────────────────────────────────────────────────
 if sort_by == "Departure ↑":
-    filtered.sort(key=lambda t: time_to_min(t["dep"]))
+    filtered.sort(key=lambda t: time_to_min(t["departure"]))
 elif sort_by == "Arrival ↑":
-    filtered.sort(key=lambda t: time_to_min(t["arr"]))
+    filtered.sort(key=lambda t: time_to_min(t["arrival"]))
 elif sort_by == "Train Name A–Z":
-    filtered.sort(key=lambda t: t["name"])
+    filtered.sort(key=lambda t: t["train_name"])
 else:
-    filtered.sort(key=lambda t: int(t["no"]))
+    filtered.sort(key=lambda t: t["train_number"])
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
-stn_code = station.split("(")[-1].replace(")", "")
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Station Code", stn_code)
-m2.metric("Trains Shown", len(filtered))
-m3.metric("Originate Here", sum(1 for t in filtered if t["rel"] == "Originates"))
-m4.metric("Terminate Here", sum(1 for t in filtered if t["rel"] == "Terminates"))
+m1.metric("Station Code",   station_code)
+m2.metric("Trains Shown",   len(filtered))
+m3.metric("Originate Here", sum(1 for t in filtered if t["relation"] == "Originates"))
+m4.metric("Terminate Here", sum(1 for t in filtered if t["relation"] == "Terminates"))
 
 st.divider()
 
@@ -149,67 +242,87 @@ if not filtered:
     st.warning("No trains match the selected filters.")
     st.stop()
 
+# ── View toggle ────────────────────────────────────────────────────────────────
 view_mode = st.radio("View as", ["Cards", "Table"], horizontal=True, label_visibility="collapsed")
 
+# ── Table view ─────────────────────────────────────────────────────────────────
 if view_mode == "Table":
     rows = []
     for t in filtered:
         rows.append({
-            "Train No":   t["no"],
-            "Name":       t["name"],
-            "Type":       t["type"],
-            "From":       f"{t['frm_name']} ({t['frm']})",
-            "To":         f"{t['to_name']} ({t['to']})",
-            "Arrival":    t["arr"],
-            "Departure":  t["dep"],
-            "Duration":   t["dur"],
-            "Dist (km)":  t["dist"],
-            "Stops":      t["stops"],
-            "Classes":    t["classes"],
-            "Runs on":    t["days"],
-            "Relation":   t["rel"],
+            "Train No":  t["train_number"],
+            "Name":      t["train_name"],
+            "Type":      t["train_type"],
+            "From":      f"{t['from_station_name']} ({t['from_station_code']})",
+            "To":        f"{t['to_station_name']} ({t['to_station_code']})",
+            "Arrival":   fmt_time(t["arrival"]),
+            "Departure": fmt_time(t["departure"]),
+            "Duration":  t["duration"],
+            "Dist (km)": t["distance_km"],
+            "Classes":   t["classes"],
+            "Relation":  t["relation"],
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+# ── Card view ──────────────────────────────────────────────────────────────────
 else:
     for t in filtered:
-        color    = TYPE_COLORS.get(t["type"], "#5F5E5A")
-        rel_icon = {"Originates": "🟢", "Terminates": "🔴", "Passes": "🔵"}.get(t["rel"], "⚪")
+        color    = type_color(t["train_type"])
+        rel_icon = {"Originates": "🟢", "Terminates": "🔴", "Passes": "🔵"}.get(t["relation"], "⚪")
+        arr      = fmt_time(t["arrival"])
+        dep      = fmt_time(t["departure"])
 
         with st.container(border=True):
             r1, r2 = st.columns([5, 1])
             with r1:
                 st.markdown(
-                    f"**{t['name']}**&nbsp;&nbsp;"
+                    f"**{t['train_name']}**&nbsp;&nbsp;"
                     f"<span style='background:{color}22;color:{color};"
                     f"padding:2px 10px;border-radius:12px;font-size:12px;font-weight:500'>"
-                    f"{t['type']}</span>",
+                    f"{t['train_type']}</span>",
                     unsafe_allow_html=True,
                 )
-                st.caption(f"Train #{t['no']} &nbsp;·&nbsp; {rel_icon} {t['rel']} &nbsp;·&nbsp; {t['days']}")
+                st.caption(f"Train #{t['train_number']} &nbsp;·&nbsp; {rel_icon} {t['relation']}")
             with r2:
-                st.markdown(f"<div style='text-align:right;font-size:13px;color:gray'>{t['dist']} km</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='text-align:right;font-size:13px;color:gray'>{t['dur']}</div>", unsafe_allow_html=True)
+                if t["distance_km"]:
+                    st.markdown(f"<div style='text-align:right;font-size:13px;color:gray'>{t['distance_km']} km</div>", unsafe_allow_html=True)
+                if t["duration"]:
+                    st.markdown(f"<div style='text-align:right;font-size:13px;color:gray'>{t['duration']}</div>", unsafe_allow_html=True)
 
             c1, c2, c3 = st.columns([2, 1, 2])
             with c1:
-                # Left column: origin station — show DEP if originates/passes, ARR if terminates
-                if t["rel"] == "Terminates":
-                    st.markdown(f"**FROM**")
-                else:
-                    st.markdown(f"**DEP {t['dep']}**")
-                st.caption(f"{t['frm_name']} ({t['frm']})")
+                lbl  = "ARR" if t["relation"] == "Terminates" else "DEP"
+                time = arr   if t["relation"] == "Terminates" else dep
+                st.markdown(f"**{lbl} {time}**")
+                st.caption(f"{t['from_station_name']} ({t['from_station_code']})")
             with c2:
                 st.markdown("<div style='text-align:center;font-size:20px;padding-top:4px'>→</div>", unsafe_allow_html=True)
             with c3:
-                # Right column: destination station — show ARR if terminates/passes, TO if originates
-                if t["rel"] == "Originates":
-                    st.markdown(f"**TO**")
-                else:
-                    st.markdown(f"**ARR {t['arr']}**")
-                st.caption(f"{t['to_name']} ({t['to']})")
+                lbl2  = "ARR" if t["relation"] != "Originates" else "TO"
+                time2 = arr  if t["relation"] != "Originates" else ""
+                st.markdown(f"**{lbl2} {time2}**" if time2 else f"**{lbl2}**")
+                st.caption(f"{t['to_station_name']} ({t['to_station_code']})")
 
-            st.caption(f"🪑 {t['classes']} &nbsp;·&nbsp; {t['stops']} stops")
+            if t["classes"]:
+                st.caption(f"🪑 {t['classes']}")
+
+            # Expandable stops
+            with st.expander("View intermediate stops"):
+                stops = get_train_stops(t["train_number"])
+                if stops:
+                    stop_rows = []
+                    for i, s in enumerate(stops, start=1):
+                        stop_rows.append({
+                            "Stop #":    i,
+                            "Station":   s.get("station_name", ""),
+                            "Code":      s.get("station_code", ""),
+                            "Arrival":   fmt_time(s.get("arrival",   "")),
+                            "Departure": fmt_time(s.get("departure", "")),
+                            "Day":       s.get("day", 1),
+                        })
+                    st.dataframe(pd.DataFrame(stop_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No stop data available.")
 
 st.divider()
-st.caption("Data verified from IndiaRailInfo, Wikipedia & IRCTC. For live status and booking → [IRCTC](https://www.irctc.co.in) | [NTES](https://enquiry.indianrail.gov.in)")
+st.caption("Data source: Indian Railways open dataset. For live status → [NTES](https://enquiry.indianrail.gov.in) | Booking → [IRCTC](https://www.irctc.co.in)")
